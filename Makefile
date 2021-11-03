@@ -7,14 +7,17 @@ LIBS = log
 LIBLOG = liblog
 
 EXE = oss osschild
-DEPS = config.h
-OBJS =
+DEPS = shared.h
+OBJS = shared.o
 
 CLEAN = $(EXE) *.o $(OBJS) $(LIB)/$(LIBLOG).a $(LIB)/*.h logfile
 
 all: $(LIB)/$(LIBLOG).a $(EXE)
 
-%sim: %sim.o $(OBJS) $(DEPS)
+oss: oss.o $(OBJS) $(DEPS)
+	$(CC) $(CFLAGS) -o $@ $< $(OBJS) -Llib -l$(LIBS)
+
+osschild: osschild.o $(OBJS) $(DEPS)
 	$(CC) $(CFLAGS) -o $@ $< $(OBJS) -Llib -l$(LIBS)
 
 $(LIB)/$(LIBLOG).a: $(LIB)/$(LIBLOG)/Makefile

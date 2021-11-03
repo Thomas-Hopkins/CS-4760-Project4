@@ -1,7 +1,12 @@
-#include "shared.h"
 #include <stdbool.h>
+#include <stdlib.h>
+#include <stdio.h>
 #include <errno.h>
 #include <sys/shm.h>
+
+#include "shared.h"
+
+struct oss_shm* shared_mem = NULL; 
 
 // Private function to get shared memory key
 int get_shm() {
@@ -25,7 +30,7 @@ int attach_shm(int mem_id) {
 
 	// Attach shared memory to struct pointer
 	shared_mem = shmat(mem_id, NULL, 0);
-	if (shared_mem == -1 ) {
+	if (shared_mem == NULL ) {
 		return -1;
 	}
 	return 0;
@@ -33,11 +38,25 @@ int attach_shm(int mem_id) {
 
 // Public function to initialize shared memory
 void init_shm() {
-    int mem_id = get_shm()
+    int mem_id = get_shm();
     if (mem_id < 0) {
         printf("Could not get shared memory file.");
     }
     if (attach_shm(mem_id) < 0) {
         printf("Could not attach to shared memory.");
     }
+}
+
+// Public function to destruct shared memory
+void dest_shm() {
+	int mem_id = get_shm();
+
+	if (mem_id < 0) {
+        printf("Could not get shared memory file.");
+    }
+	if (shmctl(mem_id, IPC_RMID, NULL) < 0) {
+        printf("Could not remove shared memory.");
+	}
+
+	shared_mem = NULL;
 }

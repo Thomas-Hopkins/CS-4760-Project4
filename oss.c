@@ -1,8 +1,12 @@
 #include <stdio.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <errno.h>
 
+#include "shared.h"
+
+extern struct oss_shm shared_mem;
 static char* exe_name;
 
 void help() {
@@ -12,6 +16,19 @@ void help() {
 	printf("-s sec\tSet the maximum runtime before system terminates (Required).\n");
 	printf("-l filename\tSet the log file name (Required).\n");
 	printf("\n");
+}
+
+void init_oss() {
+    // Attach to shared memory.
+    init_shm();
+    shared_mem.sys_clock.seconds = 0;
+    shared_mem.sys_clock.nanoseconds = 0;
+    shared_mem.process_table_size = 0;
+
+}
+
+void dest_oss() {
+    dest_shm();
 }
 
 int main(int argc, char** argv) {
@@ -43,7 +60,7 @@ int main(int argc, char** argv) {
                 exit(EXIT_FAILURE);
         }
     }
-    if (logfile == "") {
+    if (logfile == NULL) {
         errno = EINVAL;
         fprintf(stderr, "%s: ", exe_name);
         perror("Did not specify logfile with -l");
@@ -56,6 +73,9 @@ int main(int argc, char** argv) {
         exit(EXIT_FAILURE);
     }
 
+    init_oss();
+    printf("%ld:%ld", shared_mem.sys_clock.seconds, shared_mem.sys_clock.nanoseconds);
+    dest_oss();
     // TODO: Allocate shared memory for:
     //          process table of 18 process control blocks each containing: 
     //              cpu time used

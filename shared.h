@@ -10,19 +10,20 @@ struct time {
 };
 
 struct process_ctrl_block {
-    time total_cpu_time;
-    time total_sys_time;
-    time last_burst_time;
+    struct time total_cpu_time;
+    struct time total_sys_time;
+    struct time last_burst_time;
     unsigned int pid;
     unsigned int priority;
 };
 
 struct oss_shm {
-    time sys_clock;
-    process_ctrl_block process_table[MAX_PROCESSES];
+    struct time sys_clock;
+    struct process_ctrl_block process_table[MAX_PROCESSES];
     size_t process_table_size;
 };
 
 void init_shm();
+void dest_shm();
 
 #endif
