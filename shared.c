@@ -2,18 +2,20 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <errno.h>
+#include <sys/msg.h>
 #include <sys/shm.h>
 
 #include "shared.h"
 
-struct oss_shm* shared_mem = NULL; 
+struct oss_shm* shared_mem = NULL;
+static int message_queue = -1;
 
 // Private function to get shared memory key
-int get_shm() {
+int get_shm(int token) {
 	key_t key;
 
 	// Get numeric key of shared memory file
-	key = ftok(SHM_FILE, 0);
+	key = ftok(SHM_FILE, token);
 	if (key == -1) {
 		return -1;
 	}
@@ -36,9 +38,36 @@ int attach_shm(int mem_id) {
 	return 0;
 }
 
+// Public function to initialize message queues
+void init_msg(bool create) {
+	key_t msg_key = ftok(SHM_FILE, MSG_SHM);
+
+	if (msg_key < 0) {
+        printf("Could not get message queue file.");
+	}
+
+	if (create) {
+		message_queue = msgget(msg_key, 0644 | IPC_CREAT);
+	}
+	else {
+		message_queue = msgget(msg_key, 0644 | IPC_EXCL);
+	}
+
+	if (message_queue < 0) {
+        printf("Could not attach to message queue.");
+	}
+}
+
+// Public function to destruct message queue
+void dest_msg() {
+	if (msgctl(message_queue, IPC_RMID, NULL) < 0) {
+		printf("Could not detach message queue.");
+	} 
+}
+
 // Public function to initialize shared memory
 void init_shm() {
-    int mem_id = get_shm();
+    int mem_id = get_shm(OSS_SHM);
     if (mem_id < 0) {
         printf("Could not get shared memory file.");
     }
@@ -49,7 +78,7 @@ void init_shm() {
 
 // Public function to destruct shared memory
 void dest_shm() {
-	int mem_id = get_shm();
+	int mem_id = get_shm(OSS_SHM);
 
 	if (mem_id < 0) {
         printf("Could not get shared memory file.");

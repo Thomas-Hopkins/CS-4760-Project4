@@ -1,8 +1,12 @@
 #ifndef __SHARED_H
 #define __SHARED_H
 
+#include <stdbool.h>
+
 #define MAX_PROCESSES 18
 #define SHM_FILE "shmOSS.shm"
+
+enum {OSS_SHM, MSG_SHM};
 
 struct time {
     unsigned long nanoseconds;
@@ -25,5 +29,7 @@ struct oss_shm {
 
 void init_shm();
 void dest_shm();
+void init_msg(bool create);
+void dest_msg();
 
 #endif

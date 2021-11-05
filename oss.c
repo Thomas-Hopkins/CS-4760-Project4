@@ -5,6 +5,7 @@
 #include <errno.h>
 
 #include "shared.h"
+#include "config.h"
 
 extern struct oss_shm shared_mem;
 static char* exe_name;
@@ -25,10 +26,18 @@ void init_oss() {
     shared_mem.sys_clock.nanoseconds = 0;
     shared_mem.process_table_size = 0;
 
+    // Create message queue
+    init_msg(true);
 }
 
 void dest_oss() {
     dest_shm();
+    dest_msg();
+}
+
+int launch_child(int mode) {
+    char* program = "./osschild";
+    return execl(program, program, "-m", mode, NULL);
 }
 
 int main(int argc, char** argv) {
@@ -73,8 +82,12 @@ int main(int argc, char** argv) {
         exit(EXIT_FAILURE);
     }
 
+    // Initialize the OSS shared memory
     init_oss();
+
     printf("%ld:%ld", shared_mem.sys_clock.seconds, shared_mem.sys_clock.nanoseconds);
+    
+    // Destruct OSS shared memory
     dest_oss();
     // TODO: Allocate shared memory for:
     //          process table of 18 process control blocks each containing: 
