@@ -89,3 +89,13 @@ void dest_shm() {
 
 	shared_mem = NULL;
 }
+
+void add_time(struct time_clock* Time, unsigned long seconds, unsigned long nanoseconds) {
+	Time->seconds += seconds;
+	Time->nanoseconds += nanoseconds;
+	if (Time->nanoseconds > 1000000000)
+	{
+		Time->seconds += 1;
+		Time->nanoseconds -= 1000000000;
+	}
+}
