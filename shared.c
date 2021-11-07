@@ -2,13 +2,15 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <errno.h>
+#include <string.h>
 #include <sys/msg.h>
 #include <sys/shm.h>
 
 #include "shared.h"
 
 struct oss_shm* shared_mem = NULL;
-static int message_queue = -1;
+static int oss_msg_queue;
+static int child_msg_queue;
 
 // Private function to get shared memory key
 int get_shm(int token) {
@@ -40,27 +42,33 @@ int attach_shm(int mem_id) {
 
 // Public function to initialize message queues
 void init_msg(bool create) {
-	key_t msg_key = ftok(SHM_FILE, MSG_SHM);
+	key_t oss_msg_key = ftok(SHM_FILE, OSS_MSG_SHM);
+	key_t child_msg_key = ftok(SHM_FILE, CHILD_MSG_SHM);
 
-	if (msg_key < 0) {
-        printf("Could not get message queue file.");
+	if (oss_msg_key < 0 || child_msg_key < 0) {
+        printf("Could not get message queue(s) file.");
 	}
 
 	if (create) {
-		message_queue = msgget(msg_key, 0644 | IPC_CREAT);
+		oss_msg_queue = msgget(oss_msg_key, 0644 | IPC_CREAT);
+		child_msg_queue = msgget(child_msg_key, 0644 | IPC_CREAT);
 	}
 	else {
-		message_queue = msgget(msg_key, 0644 | IPC_EXCL);
+		oss_msg_queue = msgget(oss_msg_key, 0644 | IPC_EXCL);
+		child_msg_queue = msgget(child_msg_key, 0644 | IPC_EXCL);
 	}
 
-	if (message_queue < 0) {
-        printf("Could not attach to message queue.");
+	if (oss_msg_queue < 0 || child_msg_queue < 0) {
+        printf("Could not attach to message queue(s).");
 	}
 }
 
 // Public function to destruct message queue
 void dest_msg() {
-	if (msgctl(message_queue, IPC_RMID, NULL) < 0) {
+	if (msgctl(oss_msg_queue, IPC_RMID, NULL) < 0) {
+		printf("Could not detach message queue.");
+	}
+	if (msgctl(child_msg_queue, IPC_RMID, NULL) < 0) {
 		printf("Could not detach message queue.");
 	} 
 }
@@ -98,4 +106,55 @@ void add_time(struct time_clock* Time, unsigned long seconds, unsigned long nano
 		Time->seconds += 1;
 		Time->nanoseconds -= 1000000000;
 	}
+}
+
+bool sub_time(struct time_clock* Time, unsigned long seconds, unsigned long nanoseconds) {
+	// If subtracting more nanoseconds then is on the clock
+	if (nanoseconds > Time->nanoseconds) {
+		// See if we can borrow a second
+		if (Time->seconds < 1) return false;
+		// Borrow a second
+		Time->nanoseconds += 1000000000;
+		Time->seconds -= 1;
+	}
+	// Subtract the nanoseconds
+	Time->nanoseconds -= nanoseconds;
+
+	// If subtracting more seconds than we have on clock
+	if (seconds > Time->seconds) {
+		// Add back the nanoseconds we took
+		add_time(Time, 0, nanoseconds);
+		return false;
+	}
+	// Subtract the seconds
+	Time->seconds -= seconds;
+	return true;
+}
+
+int recieve_msg(struct message* msg, int msg_queue, bool wait) {
+	int msg_queue_id;
+	if (msg_queue == OSS_MSG_SHM) {
+		msg_queue_id = oss_msg_queue;
+	}
+	else if (msg_queue == CHILD_MSG_SHM) {
+		msg_queue_id = child_msg_queue;
+	}
+	else {
+		printf("Got unexpected message queue ID of %d\n", msg_queue);
+	}
+	return msgrcv(msg_queue_id, msg, sizeof(struct message), 0, wait ? 0 : IPC_NOWAIT);
+}
+
+int send_msg(struct message* msg, int msg_queue, bool wait) {
+	int msg_queue_id;
+	if (msg_queue == OSS_MSG_SHM) {
+		msg_queue_id = oss_msg_queue;
+	}
+	else if (msg_queue == CHILD_MSG_SHM) {
+		msg_queue_id = child_msg_queue;
+	}
+	else {
+		printf("Got unexpected message queue ID of %d\n", msg_queue);
+	}
+	return msgsnd(msg_queue_id, msg, sizeof(struct message), wait ? 0 : IPC_NOWAIT);
 }

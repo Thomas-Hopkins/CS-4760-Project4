@@ -1,30 +1,19 @@
 CC = gcc
 CFLAGS = -Wall -g
 
-LIB = lib
-LIBS = log
-
-LIBLOG = liblog
-
 EXE = oss osschild
 DEPS = shared.h
 OBJS = shared.o
 
-CLEAN = $(EXE) *.o $(OBJS) $(LIB)/$(LIBLOG).a $(LIB)/*.h logfile
+CLEAN = $(EXE) *.o $(OBJS) logfile
 
-all: $(LIB)/$(LIBLOG).a $(EXE)
+all: $(EXE)
 
 oss: oss.o $(OBJS) $(DEPS)
-	$(CC) $(CFLAGS) -o $@ $< $(OBJS) -Llib -l$(LIBS)
+	$(CC) $(CFLAGS) -o $@ $< $(OBJS)
 
 osschild: osschild.o $(OBJS) $(DEPS)
-	$(CC) $(CFLAGS) -o $@ $< $(OBJS) -Llib -l$(LIBS)
-
-$(LIB)/$(LIBLOG).a: $(LIB)/$(LIBLOG)/Makefile
-	echo $(LIB)/$(LIBLOG).a make
-	make -C lib/liblog
-	cp lib/liblog/log.h lib
-	mv lib/liblog/liblog.a lib
+	$(CC) $(CFLAGS) -o $@ $< $(OBJS) 
 
 %.o: %.c %.h
 	$(CC) $(CFLAGS) -o $@ -c $<
@@ -32,4 +21,3 @@ $(LIB)/$(LIBLOG).a: $(LIB)/$(LIBLOG)/Makefile
 .PHONY: clean
 clean:
 	rm -f $(CLEAN)
-	make -C lib/liblog clean
