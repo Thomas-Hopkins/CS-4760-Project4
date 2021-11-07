@@ -8,6 +8,7 @@
 #include <wait.h>
 #include <string.h>
 
+#include "queue.h"
 #include "shared.h"
 #include "config.h"
 
@@ -15,6 +16,9 @@ short bit_vec[MAX_PROCESSES];
 extern struct oss_shm* shared_mem;
 static char* exe_name;
 static int max_secs = -1;
+static struct Queue queue_high_pri;
+static struct Queue queue_low_pri;
+static struct Queue queue_blocked;
 
 void help();
 void signal_handler(int signum);
@@ -70,9 +74,12 @@ int main(int argc, char** argv) {
     // Keep track of the last time on the sys clock when we run a process
     unsigned long last_run_seconds = 0;
     unsigned long last_run_nanoseconds = 0;
+    unsigned long last_low_run_seconds = 0;
 
     // Main OSS loop. We handle scheduling processes here.
     while (true) {
+        // Simulate some passed time for this loop (1 second and [0, 1000] nanoseconds)
+        add_time(&(shared_mem->sys_clock), 1, rand() % 1000);
         // Check if enough time has passed to spawn a new process
         if ((shared_mem->sys_clock.seconds - last_run_seconds > maxTimeBetweenNewProcsSecs) && 
         (shared_mem->sys_clock.nanoseconds - last_run_nanoseconds > maxTimeBetweenNewProcsNS)) {
@@ -101,10 +108,18 @@ int main(int argc, char** argv) {
                 shared_mem->process_table[sim_pid].last_burst_time.seconds = 0;
 
                 shared_mem->process_table[sim_pid].pid = sim_pid;
-                shared_mem->process_table[sim_pid].priority = 0;
 
                 // Choose process mode based on a weighted chance
                 int process_mode = rand() % 100 > percentChanceIsIO ? CPU_MODE: IO_MODE;
+                shared_mem->process_table[sim_pid].priority = process_mode;
+
+                // Insert processes into queue based on priority
+                if (process_mode == CPU_MODE) {
+                    queue_insert(&queue_high_pri, sim_pid);
+                }
+                else {
+                    queue_insert(&queue_low_pri, sim_pid);
+                }
 
                 // Fork and launch child process
                 printf("Creating process of sim id: %d\n", sim_pid);
@@ -128,43 +143,61 @@ int main(int argc, char** argv) {
 
         struct message msg;
         strncpy(msg.msg_text, "", MSG_BUFFER_LEN);
-        msg.msg_type = 1;
-        int sim_pid; 
+
+        // Select from low priority queue if it is not empty and we've passed 5 seconds since last 
+        if (!queue_is_empty(&queue_low_pri) && (last_run_seconds - last_low_run_seconds) > 5 ) {
+            last_low_run_seconds = shared_mem->sys_clock.seconds;
+            msg.msg_type = queue_pop(&queue_low_pri);
+        }
+        // Select from high priority if not empty
+        else if (!queue_is_empty(&queue_high_pri)) {
+            msg.msg_type = queue_pop(&queue_high_pri);
+        }
+        else {
+            continue;
+        }
+
+        int sim_pid;
         recieve_msg(&msg, OSS_MSG_SHM, false);
 
         char* cmd = strtok(msg.msg_text, " ");
         if (cmd != NULL) {
             if (strncmp(cmd, "ready", MSG_BUFFER_LEN) == 0) {
-                // TODO: Use scheduling queue algorithm to schedule then run next child
                 sim_pid = atoi(strtok(NULL, " "));
-                sprintf(msg.msg_text, "run %d %d", 0, rand() % 10000000);
+                sprintf(msg.msg_text, "run %d %d %d", sim_pid, 0, rand() % 10000000);
                 send_msg(&msg, CHILD_MSG_SHM, false);
             }
             else if (strncmp(cmd, "finished", MSG_BUFFER_LEN) == 0) {
-                printf("a program finished!\n");
+                sim_pid = atoi(strtok(NULL, " "));
+                bit_vec[sim_pid] = 0;
+                shared_mem->process_table_size--;
+                printf("Program %d has finished.\n", sim_pid);
             }
             else if (strncmp(cmd, "terminated", MSG_BUFFER_LEN) == 0) {
-                printf("a program terminated!\n");
+                sim_pid = atoi(strtok(NULL, " "));
+                bit_vec[sim_pid] = 0;
+                shared_mem->process_table_size--;
+                printf("Program %d has terminated.\n", sim_pid);
             }
             else if (strncmp(cmd, "blocked", MSG_BUFFER_LEN) == 0) {
+                sim_pid = atoi(strtok(NULL, " "));
+                queue_insert(&queue_blocked, sim_pid);
                 printf("a program is blocked!\n");
             }
         }
 
+        // Run next child in queue
+
         // See if any processes have returned
-        int simulated_pid;
-        pid_t pid = waitpid(-1, &simulated_pid, WNOHANG);
+        pid_t pid = waitpid(-1, &sim_pid, WNOHANG);
 		if (pid > 0) {
             // Get the returned simulated pid child exits with
-            simulated_pid = WEXITSTATUS(simulated_pid);
+            sim_pid = WEXITSTATUS(sim_pid);
             // Clear up this process for future use
-            shared_mem->process_table[simulated_pid].pid = 0;
-            bit_vec[simulated_pid] = 0;
-			shared_mem->process_table_size--;
+            if (bit_vec[sim_pid] != 0) {
+                printf("WARNING: process %d did not cleanup.", sim_pid);
+            }
 		} 
-
-        // Simulate some passed time for this loop (1 second and [0, 1000] nanoseconds)
-        add_time(&(shared_mem->sys_clock), 1, rand() % 1000);
     }
     dest_oss();
     exit(EXIT_SUCCESS);
@@ -180,7 +213,7 @@ void help() {
 }
 
 void signal_handler(int signum) {
-    // Issue messages	
+    // Issue messages
 	if (signum == SIGINT) {
 		fprintf(stderr, "\nRecieved SIGINT signal interrupt, terminating children.\n");
 	}
@@ -217,6 +250,11 @@ void init_oss() {
     for (int i = 0; i < MAX_PROCESSES; i++) {
         bit_vec[i] = 0;
     }
+
+    // Setup queues
+    queue_init(&queue_high_pri);
+    queue_init(&queue_low_pri);
+    queue_init(&queue_blocked);
 
     // Setup signal handlers
 	signal(SIGINT, signal_handler);

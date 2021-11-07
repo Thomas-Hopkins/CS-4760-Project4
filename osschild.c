@@ -38,6 +38,7 @@ void init_child() {
 }
 
 void recieve_message(char* message) {
+    msg.msg_type = getpid();
     if (recieve_msg(&msg, CHILD_MSG_SHM, true) < 0) {
         perror("Failed to recieve message");
     }
@@ -47,7 +48,7 @@ void recieve_message(char* message) {
 void send_message(char* message) {
     msg.msg_type = getpid();
     strncpy(msg.msg_text, message, MSG_BUFFER_LEN);
-    if (send_msg(&msg, OSS_MSG_SHM, false) < 0) {
+    if (send_msg(&msg, OSS_MSG_SHM, true) < 0) {
         perror("Failed to send message");
     }
 }
@@ -94,6 +95,9 @@ int main(int argc, char** argv) {
         // Parse message
         cmd = strtok(message, " ");
         if (strncmp(cmd, "run", MSG_BUFFER_LEN) == 0) {
+            int pid = atoi(strtok(NULL, " "));
+            if (pid != sim_pid) continue;
+
             timeslice.seconds = atoi(strtok(NULL, " "));
             timeslice.nanoseconds = atoi(strtok(NULL, " "));
         }
@@ -123,7 +127,8 @@ int main(int argc, char** argv) {
         // Tell OSS ready for new schedule
         send_message(sendmessage);
     }
-    send_message("finished");
+    sprintf(sendmessage, "finished %d", sim_pid);
+    send_message(sendmessage);
 
     exit(sim_pid);
 }

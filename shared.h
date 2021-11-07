@@ -32,7 +32,6 @@ struct process_ctrl_block {
 struct oss_shm {
     struct time_clock sys_clock;
     struct process_ctrl_block process_table[MAX_PROCESSES];
-    struct message message_queue[2];
     size_t process_table_size;
 };
 

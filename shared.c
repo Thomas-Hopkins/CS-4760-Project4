@@ -142,7 +142,7 @@ int recieve_msg(struct message* msg, int msg_queue, bool wait) {
 	else {
 		printf("Got unexpected message queue ID of %d\n", msg_queue);
 	}
-	return msgrcv(msg_queue_id, msg, sizeof(struct message), 0, wait ? 0 : IPC_NOWAIT);
+	return msgrcv(msg_queue_id, msg, sizeof(struct message), msg->msg_type, wait ? 0 : IPC_NOWAIT);
 }
 
 int send_msg(struct message* msg, int msg_queue, bool wait) {
