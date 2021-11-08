@@ -16,6 +16,10 @@ short bit_vec[MAX_PROCESSES];
 extern struct oss_shm* shared_mem;
 static char* exe_name;
 static int max_secs = -1;
+static int running_pid = -1;
+static int iters_since_low = 0;
+static struct message msg;
+static struct time_clock last_run;
 static struct Queue queue_high_pri;
 static struct Queue queue_low_pri;
 static struct Queue queue_blocked;
@@ -25,6 +29,9 @@ void signal_handler(int signum);
 void init_oss();
 void dest_oss();
 int launch_child(int mode, int pid);
+void try_spawn_child();
+void handle_running();
+void try_schedule_process();
 
 int main(int argc, char** argv) {
     int option;
@@ -54,7 +61,7 @@ int main(int argc, char** argv) {
                 exit(EXIT_FAILURE);
         }
     }
-    if (strncmp(logfile, "", 1)) {
+    if (logfile[0] == '\0') {
         errno = EINVAL;
         fprintf(stderr, "%s: ", exe_name);
         perror("Did not specify logfile with -l");
@@ -67,136 +74,40 @@ int main(int argc, char** argv) {
         exit(EXIT_FAILURE);
     }
 
+    // Clear logfile
+    FILE* file_ptr = fopen(logfile, "w");
+    fclose(file_ptr);
+
+
     // Initialize the OSS shared memory
     init_oss();
-    printf("%ld:%ld\n", shared_mem->sys_clock.seconds, shared_mem->sys_clock.nanoseconds);
 
     // Keep track of the last time on the sys clock when we run a process
-    unsigned long last_run_seconds = 0;
-    unsigned long last_run_nanoseconds = 0;
-    unsigned long last_low_run_seconds = 0;
+    last_run.nanoseconds = 0;
+    last_run.seconds = 0;
 
     // Main OSS loop. We handle scheduling processes here.
     while (true) {
         // Simulate some passed time for this loop (1 second and [0, 1000] nanoseconds)
         add_time(&(shared_mem->sys_clock), 1, rand() % 1000);
-        // Check if enough time has passed to spawn a new process
-        if ((shared_mem->sys_clock.seconds - last_run_seconds > maxTimeBetweenNewProcsSecs) && 
-        (shared_mem->sys_clock.nanoseconds - last_run_nanoseconds > maxTimeBetweenNewProcsNS)) {
-            // Check process control block availablity
-            if (shared_mem->process_table_size < MAX_PROCESSES) {
-                int sim_pid;
-                // Find open process in process table
-                for (int i = 0; i < MAX_PROCESSES; i++) {
-                    if (bit_vec[i] == 0) {
-                        sim_pid = i;
-                        bit_vec[i] = 1;
-                        break;
-                    }
-                }
+        // try to spawn a new child if enough time has passed
+        try_spawn_child();
+        // Run currently running process
+        handle_running();
 
-                // Initalize process in process table
-                shared_mem->process_table_size++;
+        try_schedule_process();
 
-                shared_mem->process_table[sim_pid].total_cpu_time.nanoseconds = 0;
-                shared_mem->process_table[sim_pid].total_cpu_time.seconds = 0;
-            
-                shared_mem->process_table[sim_pid].total_sys_time.nanoseconds = 0;
-                shared_mem->process_table[sim_pid].total_sys_time.seconds = 0;
 
-                shared_mem->process_table[sim_pid].last_burst_time.nanoseconds = 0;
-                shared_mem->process_table[sim_pid].last_burst_time.seconds = 0;
 
-                shared_mem->process_table[sim_pid].pid = sim_pid;
-
-                // Choose process mode based on a weighted chance
-                int process_mode = rand() % 100 > percentChanceIsIO ? CPU_MODE: IO_MODE;
-                shared_mem->process_table[sim_pid].priority = process_mode;
-
-                // Insert processes into queue based on priority
-                if (process_mode == CPU_MODE) {
-                    queue_insert(&queue_high_pri, sim_pid);
-                }
-                else {
-                    queue_insert(&queue_low_pri, sim_pid);
-                }
-
-                // Fork and launch child process
-                printf("Creating process of sim id: %d\n", sim_pid);
-                pid_t pid = fork();
-                if (pid == 0) {
-                    if (launch_child(process_mode, sim_pid) < 0) {
-                        printf("Failed to launch process.\n");
-                    }
-                } 
-                else {
-                    // Update it's actual pid
-                    shared_mem->process_table[sim_pid].actual_pid = pid;
-                }
-                // Add some time for generating a process
-                add_time(&shared_mem->sys_clock, 2, rand() % 1000);
-
-                last_run_nanoseconds = shared_mem->sys_clock.nanoseconds;
-                last_run_seconds = shared_mem->sys_clock.seconds;
-            }
-        }
-
-        struct message msg;
-        strncpy(msg.msg_text, "", MSG_BUFFER_LEN);
-
-        // Select from low priority queue if it is not empty and we've passed 5 seconds since last 
-        if (!queue_is_empty(&queue_low_pri) && (last_run_seconds - last_low_run_seconds) > 5 ) {
-            last_low_run_seconds = shared_mem->sys_clock.seconds;
-            msg.msg_type = queue_pop(&queue_low_pri);
-        }
-        // Select from high priority if not empty
-        else if (!queue_is_empty(&queue_high_pri)) {
-            msg.msg_type = queue_pop(&queue_high_pri);
-        }
-        else {
-            continue;
-        }
-
-        int sim_pid;
-        recieve_msg(&msg, OSS_MSG_SHM, false);
-
-        char* cmd = strtok(msg.msg_text, " ");
-        if (cmd != NULL) {
-            if (strncmp(cmd, "ready", MSG_BUFFER_LEN) == 0) {
-                sim_pid = atoi(strtok(NULL, " "));
-                sprintf(msg.msg_text, "run %d %d %d", sim_pid, 0, rand() % 10000000);
-                send_msg(&msg, CHILD_MSG_SHM, false);
-            }
-            else if (strncmp(cmd, "finished", MSG_BUFFER_LEN) == 0) {
-                sim_pid = atoi(strtok(NULL, " "));
-                bit_vec[sim_pid] = 0;
-                shared_mem->process_table_size--;
-                printf("Program %d has finished.\n", sim_pid);
-            }
-            else if (strncmp(cmd, "terminated", MSG_BUFFER_LEN) == 0) {
-                sim_pid = atoi(strtok(NULL, " "));
-                bit_vec[sim_pid] = 0;
-                shared_mem->process_table_size--;
-                printf("Program %d has terminated.\n", sim_pid);
-            }
-            else if (strncmp(cmd, "blocked", MSG_BUFFER_LEN) == 0) {
-                sim_pid = atoi(strtok(NULL, " "));
-                queue_insert(&queue_blocked, sim_pid);
-                printf("a program is blocked!\n");
-            }
-        }
-
-        // Run next child in queue
-
-        // See if any processes have returned
-        pid_t pid = waitpid(-1, &sim_pid, WNOHANG);
+        // See if any child processes have terminated
+        int status_pid;
+        pid_t pid = waitpid(-1, &status_pid, WNOHANG);
 		if (pid > 0) {
             // Get the returned simulated pid child exits with
-            sim_pid = WEXITSTATUS(sim_pid);
+            status_pid = WEXITSTATUS(status_pid);
             // Clear up this process for future use
-            if (bit_vec[sim_pid] != 0) {
-                printf("WARNING: process %d did not cleanup.", sim_pid);
-            }
+            bit_vec[status_pid] = 0;
+            shared_mem->process_table[status_pid].pid = 0;
 		} 
     }
     dest_oss();
@@ -279,4 +190,147 @@ int launch_child(int mode, int pid) {
     sprintf(cmd1, "-m %d", mode);
     sprintf(cmd2, "-p %d", pid);
     return execl(program, program, cmd1, cmd2, NULL);
+}
+
+void try_spawn_child() {
+    if ((shared_mem->sys_clock.seconds - last_run.seconds > maxTimeBetweenNewProcsSecs) && 
+    (shared_mem->sys_clock.nanoseconds - last_run.nanoseconds > maxTimeBetweenNewProcsNS)) {
+        // Check process control block availablity
+        if (shared_mem->process_table_size < MAX_PROCESSES) {
+            int sim_pid;
+            // Find open process in process table
+            for (int i = 0; i < MAX_PROCESSES; i++) {
+                if (bit_vec[i] == 0) {
+                    sim_pid = i;
+                    bit_vec[i] = 1;
+                    break;
+                }
+            }
+
+            // Initalize process in process table
+            shared_mem->process_table_size++;
+
+            shared_mem->process_table[sim_pid].total_cpu_time.nanoseconds = 0;
+            shared_mem->process_table[sim_pid].total_cpu_time.seconds = 0;
+        
+            shared_mem->process_table[sim_pid].total_sys_time.nanoseconds = 0;
+            shared_mem->process_table[sim_pid].total_sys_time.seconds = 0;
+
+            shared_mem->process_table[sim_pid].last_burst_time.nanoseconds = 0;
+            shared_mem->process_table[sim_pid].last_burst_time.seconds = 0;
+
+            shared_mem->process_table[sim_pid].pid = sim_pid;
+
+            // Choose process mode based on a weighted chance
+            int process_mode = rand() % 100 > percentChanceIsIO ? CPU_MODE: IO_MODE;
+            shared_mem->process_table[sim_pid].priority = process_mode;
+
+            // Fork and launch child process
+            printf("Creating process of sim id: %d\n", sim_pid);
+            pid_t pid = fork();
+            if (pid == 0) {
+                if (launch_child(process_mode, sim_pid) < 0) {
+                    printf("Failed to launch process.\n");
+                }
+            } 
+            else {
+                // Update it's actual pid
+                shared_mem->process_table[sim_pid].actual_pid = pid;
+            }
+            // Add some time for generating a process
+            add_time(&shared_mem->sys_clock, 2, rand() % 1000);
+            add_time(&last_run, shared_mem->sys_clock.seconds, shared_mem->sys_clock.nanoseconds);
+        }
+    }
+}
+
+void handle_running() {
+    if (running_pid > -1) {
+        struct process_ctrl_block* process_block = &shared_mem->process_table[running_pid];
+        strncpy(msg.msg_text, "", MSG_BUFFER_LEN);
+        msg.msg_type = process_block->actual_pid;
+        recieve_msg(&msg, OSS_MSG_SHM, true);
+        // Get first command
+        char* cmd = strtok(msg.msg_text, " ");
+
+        // terminated sginal sent
+        if (strncmp(cmd, "terminated", MSG_BUFFER_LEN) == 0) {
+            int percent = atoi(strtok(NULL, " "));
+            memcpy(&process_block->total_sys_time, &shared_mem->sys_clock, sizeof(struct time_clock));
+            int time = (process_block->priority == IO_MODE? 2 : 1) * (percent / 100) * 1000;
+
+            add_time(&process_block->total_cpu_time, 0, time);
+            add_time(&process_block->total_sys_time, 0, time);
+            add_time(&shared_mem->sys_clock, 0, time);
+
+            running_pid = -1;
+        }
+        // blocked signal sent
+        else if (strncmp(cmd, "blocked", MSG_BUFFER_LEN) == 0) {
+            int percent = atoi(strtok(NULL, " "));
+            int time = (process_block->priority == IO_MODE? 2 : 1) * (percent / 100) * 1000;
+
+            add_time(&process_block->total_cpu_time, 0, time);
+            add_time(&process_block->total_sys_time, 0, time);
+            add_time(&shared_mem->sys_clock, 0, time);
+
+            queue_insert(&queue_blocked, process_block->pid);
+            running_pid = -1;
+        }
+        // finished signal sent
+        else if (strncmp(cmd, "finished", MSG_BUFFER_LEN) == 0) {
+            int percent = 100;
+            int time = (process_block->priority == IO_MODE? 2 : 1) * (percent / 100) * 1000;
+
+            add_time(&process_block->total_cpu_time, 0, time);
+            add_time(&process_block->total_sys_time, 0, time);
+            add_time(&shared_mem->sys_clock, 0, time);
+
+            running_pid = -1;
+        }
+    }
+}
+
+void try_unblock_process() {
+    if (running_pid > -1) return;
+
+    struct process_ctrl_block* process_block = NULL;
+    // Unblock a process if we have unblocked processes in the blocked queue
+    if (!queue_is_empty(&queue_blocked)) {
+        for (int i = 0; i < queue_blocked.size; i++) {
+            int pid = queue_pop(&queue_blocked);
+            strncpy(msg.msg_text, "", MSG_BUFFER_LEN);
+            msg.msg_type = shared_mem->process_table[pid].actual_pid;
+            recieve_msg(&msg, OSS_MSG_SHM, false);
+
+            char* cmd = strtok(msg.msg_text, " ");
+
+            if (strncmp(cmd, "unblocked", MSG_BUFFER_LEN) == 0) {
+                process_block = &shared_mem->process_table[pid];
+                if (process_block->priority == IO_MODE) {
+                    queue_insert(&queue_low_pri, pid);
+                }
+                else {
+                    queue_insert(&queue_high_pri, pid);
+                }
+            }
+            else {
+                queue_insert(&queue_blocked, pid);
+            }
+        }
+    }
+}
+
+void try_schedule_process() {
+    if (running_pid > -1) return;
+
+    // Run low priority every 5 iterations
+    if (iters_since_low > 3 && !queue_is_empty(&queue_low_pri)) {
+        running_pid = queue_pop(&queue_low_pri);
+        iters_since_low = 0;
+    }
+    else if (!queue_is_empty(&queue_high_pri)) {
+        running_pid = queue_pop(&queue_high_pri);
+        iters_since_low++;
+    }
 }

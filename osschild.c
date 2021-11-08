@@ -5,9 +5,9 @@
 #include <time.h>
 
 #include "shared.h"
+#include "config.h"
 
 extern struct oss_shm* shared_mem;
-static struct time_clock needed_time;
 static struct message msg; 
 static char* exe_name;
 static int mode;
@@ -22,19 +22,6 @@ void init_child() {
     srand((int)time(NULL) + getpid());
     init_shm();
     init_msg(false);
-
-    // IO Mode proccess will run longer
-    int min_time = 2;
-    int max_time = 5;
-    if (mode == IO_MODE) {
-        min_time = 3;
-        max_time = 8;
-    }
-
-    needed_time.nanoseconds = 0;
-    needed_time.seconds = 0;
-    // Calculate the needed time for this process to finish
-    add_time(&needed_time, (rand() % max_time) + min_time, rand() % 1000000000);
 }
 
 void recieve_message(char* message) {
@@ -76,59 +63,34 @@ int main(int argc, char** argv) {
         }
     }
     init_child();
-    
-    bool finished = false;
-    // Signal OSS that this pid is ready
-    char sendmessage[MSG_BUFFER_LEN];
-    sprintf(sendmessage, "ready %d", sim_pid);
-    send_message(sendmessage);
 
     // Main loop
     while (true) {
-        char message[MSG_BUFFER_LEN];
-        char* cmd;
-        struct time_clock timeslice;
+        int priority = shared_mem->process_table[sim_pid].priority;
+        char recv_msg_buf[MSG_BUFFER_LEN];
+        char send_msg_buf[MSG_BUFFER_LEN];
+        recieve_message(recv_msg_buf);
 
-        // Wait until OSS sends up a message
-        recieve_message(message);
-
-        // Parse message
-        cmd = strtok(message, " ");
-        if (strncmp(cmd, "run", MSG_BUFFER_LEN) == 0) {
-            int pid = atoi(strtok(NULL, " "));
-            if (pid != sim_pid) continue;
-
-            timeslice.seconds = atoi(strtok(NULL, " "));
-            timeslice.nanoseconds = atoi(strtok(NULL, " "));
+        // Calculate chance for a block (twice as likely for IO bound)
+        if (rand() % 100 < percentChanceBlock * (priority == IO_MODE? 2 : 1)) {
+            int percent_completed = (rand() % 99); // 0-99% 
+            snprintf(send_msg_buf, MSG_BUFFER_LEN, "blocked %d", percent_completed);
+            send_message(send_msg_buf);
+            send_message("unblocked");     
         }
-
-        // subtract timeslice from needed time if possible
-        if (!sub_time(&needed_time, timeslice.seconds, timeslice.nanoseconds)) {
-            // Needed time is less than the timeslice given. Update timeslice to only
-            // Run that long, also update finished flag so we can stop looping.
-            timeslice.seconds = needed_time.seconds;
-            timeslice.nanoseconds = needed_time.nanoseconds;
-            finished = true;
+        // Chance for terminating 
+        else if (rand() % 100 < percentChanceTerminate) {
+            int percent_completed = (rand() % 99); // 0-99% 
+            snprintf(send_msg_buf, MSG_BUFFER_LEN, "terminated %d", percent_completed);
+            send_message(send_msg_buf);
+            exit(sim_pid);
         }
-
-        // TODO: Randomly block/terminate child and send signal to oss
-
-        // Update the amount of time spent on the cpu in this increment
-        shared_mem->process_table[sim_pid].last_burst_time.seconds = timeslice.seconds;
-        shared_mem->process_table[sim_pid].last_burst_time.nanoseconds = timeslice.nanoseconds;
-
-        // Update total amount of time spent on cpu
-        shared_mem->process_table[sim_pid].total_cpu_time.seconds += timeslice.seconds;
-        shared_mem->process_table[sim_pid].total_cpu_time.nanoseconds += timeslice.nanoseconds;
-
-        if (finished) {
-            break;
+        // Otherwise, chance that it will finish
+        else if (rand() % 100 < percentChanceFinish) {
+            send_message("finished");
         }
-        // Tell OSS ready for new schedule
-        send_message(sendmessage);
+        
     }
-    sprintf(sendmessage, "finished %d", sim_pid);
-    send_message(sendmessage);
 
     exit(sim_pid);
 }

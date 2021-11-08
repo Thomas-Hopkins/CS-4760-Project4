@@ -5,11 +5,12 @@
 
 void queue_init(struct Queue* queue) {
     queue->front_ind = 0;
-    queue->rear_ind = -1;
+    queue->rear_ind = 0;
     queue->size = 0;
 }
 
 int queue_pop(struct Queue* queue) {
+    if (queue_is_empty(queue)) return -1;
     int element = queue->elements[queue->front_ind];
     queue->front_ind++;
 
@@ -22,19 +23,20 @@ int queue_pop(struct Queue* queue) {
 }
 
 int queue_peek(struct Queue* queue) {
+    if (queue_is_empty(queue)) return -1;
     return queue->elements[queue->front_ind];
 }
 
 void queue_insert(struct Queue* queue, int element) {
-    if (!queue_is_full(queue)) {
-        if (queue->rear_ind == MAX_ELEMENTS - 1) {
-            queue->rear_ind = -1;
-        }
-
-        queue->rear_ind++;
-        queue->elements[queue->rear_ind] = element;
-        queue->size++;
+    if (queue_is_full(queue)) return;
+    if (queue->rear_ind == MAX_ELEMENTS - 1) {
+        queue->rear_ind = 0;
     }
+
+    queue->rear_ind++;
+    queue->elements[queue->rear_ind] = element;
+    queue->size++;
+    
 }
 
 bool queue_is_full(struct Queue* queue) {

@@ -1,0 +1,42 @@
+|----    README PROJECT 4    -----|
+|---- AUTHOR: Thomas Hopkins -----|
+|----  UMSL CMPSCI-4760-002  -----|
+
+|- COMPILING -|
+The provided Makefile will build the two executables "oss" and
+    "osschild"
+Simply run "make" and the two  executables will be outputted.
+    See the USAGE section below to see how to run the programs.
+A cleaning function is provided. run "make clean" to clean up
+	the directory and leave only src behind.
+
+
+|- USAGE -|
+The "oss" executable is intended to simulate process scheduling
+    for an operating system. 
+
+The oss executable takes 2 required arguments:
+[-s n] Specifies the time in seconds you wish for the oss simulator
+    to run.
+[-l logfile] Specifies the output file to which log messages will be
+    written.
+-h Shows a help menu.
+
+
+The osschild excutable is run by oss. It is not intended to be run alone.
+    However, it takes two arguments from oss. This being the following:
+[-p pid] The simulated pid of the process
+[-m mode] Wether it is running in simulated IO mode or CPU mode
+
+
+|- FUNCTIONALITY -|
+The oss executable will generate a number of children processes. And add
+them to a queue. The children process will signal the oss over a message queue
+when they are ready to execute. 
+
+Oss will select a process from the process queue and give it some time to
+execute. 
+
+
+|- KNOWN ISSUES/LIMITATIONS -|
+
