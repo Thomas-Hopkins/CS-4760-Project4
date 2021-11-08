@@ -1,6 +1,8 @@
 #ifndef __CONFIG_H
 #define __CONFIG_H
 
+#define LOG_FILE_MAX 10000
+
 const unsigned int maxTimeBetweenNewProcsNS = 0;
 const unsigned int maxTimeBetweenNewProcsSecs = 1;
 

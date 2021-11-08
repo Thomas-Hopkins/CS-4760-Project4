@@ -31,12 +31,26 @@ The osschild excutable is run by oss. It is not intended to be run alone.
 
 |- FUNCTIONALITY -|
 The oss executable will generate a number of children processes. And add
-them to a queue. The children process will signal the oss over a message queue
-when they are ready to execute. 
+them to one of two queues. The children process will signal the oss over 
+a message queue when they are ready to execute. 
 
-Oss will select a process from the process queue and give it some time to
-execute. 
+Oss will select a process from the process queue and if the child has signaled
+ready it will give it some time to execute. The child will randomly terminate,
+block, or finish normally. Upon each of these it will signal the OSS
+
+The oss will handle these conditions after recieving them. Once handled the OSS
+will then schedule the next process for execution. 
 
 
 |- KNOWN ISSUES/LIMITATIONS -|
+Processes are not properly rescheduled and run after they finish their 
+first cpu burst.
 
+There is a bug which causes some simulated pids to reset to zero.
+
+The scheduling algorithm is very basic and only uses 2 queues which
+simply divides up I/O bound and CPU bound processes. I/O bound processes
+are scheduled with less priority than CPU bound.
+
+The logging system will overwrite the previous log each time rather than
+create a new log.

@@ -117,7 +117,6 @@ int main(int argc, char** argv) {
             status_pid = WEXITSTATUS(status_pid);
             // Clear up this process for future use
             bit_vec[status_pid] = 0;
-            shared_mem->process_table[status_pid].pid = 0;
             if (running_pid == status_pid) {
                 running_pid = -1;
             }
@@ -374,28 +373,31 @@ void try_unblock_process() {
 void try_schedule_process() {
     if (running_pid > -1) return;
 
-    // Run low priority every 5 iterations
-    if (iters_since_low > 3 && !queue_is_empty(&queue_low_pri)) {
+    // Run low priority every 3 iterations, or when high priority queue is empty
+    if ((iters_since_low > 3 && !queue_is_empty(&queue_low_pri)) || queue_is_empty(&queue_high_pri)) {
         running_pid = queue_pop(&queue_low_pri);
         iters_since_low = 0;
     }
+    // run high priority queue
     else if (!queue_is_empty(&queue_high_pri)) {
         running_pid = queue_pop(&queue_high_pri);
         iters_since_low++;
     }
 
     if (running_pid < 0) return;
+    // If we got a process to run then send it the run signal
     snprintf(msg.msg_text, MSG_BUFFER_LEN, "run %d %d", 0, rand() % 1000);
     msg.msg_type = shared_mem->process_table[running_pid].actual_pid;
     send_msg(&msg, CHILD_MSG_SHM, false);
 
+    // log it
     char output[100];
     snprintf(output, 100, "Process with PID %d selected to run from queue %d", running_pid, iters_since_low == 3? IO_MODE : CPU_MODE);
     save_to_log(output);
 }
 
 void generate_report() {
-    printf("\nSUMMARY\n");
+    printf("\tREPORT SUMMARY\n");
 	printf("\tI/O Bound processes: %d\n", num_io_proc);
 	printf("\tCPU Bound processes: %d\n", num_cpu_proc);
 	printf("\tBlocked processes: %d\n", num_blocked_proc);
@@ -420,6 +422,10 @@ void generate_report() {
 void save_to_log(char* text) {
 	FILE* file_log = fopen(logfile, "a+");
     log_line++;
+    if (log_line > LOG_FILE_MAX) {
+        errno = EINVAL;
+        perror("Log file has exceeded max length.");
+    }
 
     // Make sure file is opened
 	if (file_log == NULL) {
