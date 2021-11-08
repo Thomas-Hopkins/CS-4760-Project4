@@ -66,28 +66,57 @@ int main(int argc, char** argv) {
 
     // Main loop
     while (true) {
+        int percent_completed = 0;
         int priority = shared_mem->process_table[sim_pid].priority;
         char recv_msg_buf[MSG_BUFFER_LEN];
         char send_msg_buf[MSG_BUFFER_LEN];
         recieve_message(recv_msg_buf);
 
+        // Parse message to get time to run for
+        struct time_clock runtime;
+        char* cmd = strtok(recv_msg_buf, " ");
+        if (strncmp(cmd, "run", MSG_BUFFER_LEN) == 0) {
+            runtime.seconds = atoi(strtok(NULL, " "));
+            runtime.nanoseconds = atoi(strtok(NULL, " "));
+        }
+
         // Calculate chance for a block (twice as likely for IO bound)
         if (rand() % 100 < percentChanceBlock * (priority == IO_MODE? 2 : 1)) {
-            int percent_completed = (rand() % 99); // 0-99% 
+            percent_completed = (rand() % 99); // 0-99% 
             snprintf(send_msg_buf, MSG_BUFFER_LEN, "blocked %d", percent_completed);
             send_message(send_msg_buf);
+
+            shared_mem->process_table[sim_pid].last_burst_time.seconds = runtime.seconds * percent_completed;
+            shared_mem->process_table[sim_pid].last_burst_time.nanoseconds = runtime.nanoseconds * percent_completed;
+
+            shared_mem->process_table[sim_pid].total_cpu_time.seconds += runtime.seconds * percent_completed;
+            shared_mem->process_table[sim_pid].total_cpu_time.nanoseconds += runtime.nanoseconds * percent_completed;
+
             send_message("unblocked");     
         }
         // Chance for terminating 
         else if (rand() % 100 < percentChanceTerminate) {
-            int percent_completed = (rand() % 99); // 0-99% 
+            percent_completed = (rand() % 99); // 0-99% 
             snprintf(send_msg_buf, MSG_BUFFER_LEN, "terminated %d", percent_completed);
             send_message(send_msg_buf);
+            
+            shared_mem->process_table[sim_pid].last_burst_time.seconds = runtime.seconds * percent_completed;
+            shared_mem->process_table[sim_pid].last_burst_time.nanoseconds = runtime.nanoseconds * percent_completed;
+
+            shared_mem->process_table[sim_pid].total_cpu_time.seconds += runtime.seconds * percent_completed;
+            shared_mem->process_table[sim_pid].total_cpu_time.nanoseconds += runtime.nanoseconds * percent_completed;
+
             exit(sim_pid);
         }
-        // Otherwise, chance that it will finish
-        else if (rand() % 100 < percentChanceFinish) {
+        // Otherwise, finished
+        else {
             send_message("finished");
+
+            shared_mem->process_table[sim_pid].last_burst_time.seconds = runtime.seconds;
+            shared_mem->process_table[sim_pid].last_burst_time.nanoseconds = runtime.nanoseconds;
+
+            shared_mem->process_table[sim_pid].total_cpu_time.seconds += runtime.seconds;
+            shared_mem->process_table[sim_pid].total_cpu_time.nanoseconds += runtime.nanoseconds;
         }
         
     }
